@@ -567,7 +567,6 @@ if rol == "👤 Consulta Pública":
 # 🛠️ VISTA 2: PANEL ADMINISTRADOR (PROTEGIDO)
 # ==========================================
 elif rol == "🛠️ Panel Administrador":
-  # --- BLOQUE DE AUTENTICACIÓN USUARIO Y CONTRASEÑA ---
   if not st.session_state.autenticado:
     st.subheader("🔑 Acceso Administrador Smart Vita")
     with st.form("form_login"):
@@ -601,7 +600,6 @@ elif rol == "🛠️ Panel Administrador":
     )
 
     with tab1:
-      # Carga opcional de datos existentes para edición
       opciones_edicion = ["-- Nuevo Registro --"] + (
           df["codigo"].tolist()
           if not df.empty and "codigo" in df.columns
