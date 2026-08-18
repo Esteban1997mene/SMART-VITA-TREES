@@ -26,7 +26,7 @@ CARPETA_FOTOS = "fotos_arboles"
 os.makedirs(CARPETA_FOTOS, exist_ok=True)
 
 # Logo Local o URL alternativa
-LOGO_LOCAL = "logo_sepal.png"
+LOGO_LOCAL = "logo_sepal.PNG"
 LOGO_SEPAL_URL = "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=100063569889815"
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
