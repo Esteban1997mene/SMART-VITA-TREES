@@ -7,30 +7,31 @@ import streamlit as st
 # ==========================================
 # 🔒 CONFIGURACIÓN DE SEGURIDAD Y LOGIN
 # ==========================================
-# CONTRASEÑA POR DEFECTO: pon aquí la contraseña que solo tú sabrás.
-PASSWORD_SECRETA = "PastoSmartVita2026*"  # <-- 🔑 CAMBIA ESTA CONTRASEÑA
+PASSWORD_SECRETA = "PastoSmartVita2026*"  # 🔑 Cambia la contraseña aquí
 
 
 def generar_hash(password: str) -> str:
-  """Convierte la contraseña a un hash SHA-256 seguro."""
   return hashlib.sha256(password.encode()).hexdigest()
 
 
 HASH_ADMIN = generar_hash(PASSWORD_SECRETA)
 
-# Manejo de la sesión de autenticación
 if "autenticado" not in st.session_state:
   st.session_state.autenticado = False
 
-# Crear carpeta de fotos
+if "arbol_seleccionado" not in st.session_state:
+  st.session_state.arbol_seleccionado = None
+
 CARPETA_FOTOS = "fotos_arboles"
 os.makedirs(CARPETA_FOTOS, exist_ok=True)
 
+# Logo Local o URL alternativa
+LOGO_LOCAL = "logo_sepal.png"
+LOGO_SEPAL_URL = "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=100063569889815"
+
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    page_title="Smart Vita - Caracterización de Árboles",
-    page_icon="🌳",
-    layout="wide",
+    page_title="SEPAL S.A. - Smart Vita", page_icon="🌳", layout="wide"
 )
 
 
@@ -54,7 +55,6 @@ def init_db():
     c.execute("ALTER TABLE arboles ADD COLUMN foto_path TEXT")
   except sqlite3.OperationalError:
     pass
-
   conn.commit()
   conn.close()
 
@@ -71,7 +71,7 @@ def insertar_datos_prueba():
             "Urapán",
             8.5,
             "Bueno",
-            "Avenida los Estudiantes - Frente a fuente",
+            "Av. los Estudiantes - Frente a fuente",
             "Requiere poda de realce.",
             "",
         ),
@@ -81,8 +81,8 @@ def insertar_datos_prueba():
             "Sangregao",
             4.5,
             "Excelente",
-            "Avenida los Estudiantes - Esquina Cra 39",
-            "Especie nativa en perfectas condiciones.",
+            "Av. los Estudiantes - Esquina Cra 39",
+            "Nativa en perfectas condiciones.",
             "",
         ),
     ]
@@ -102,7 +102,7 @@ init_db()
 insertar_datos_prueba()
 
 
-def agregar_arbol(
+def agregar_actualizar_arbol(
     codigo, especie, nombre_comun, altura, estado, ubicacion, obs, foto_path
 ):
   conn = sqlite3.connect("arboles.db")
@@ -128,6 +128,14 @@ def agregar_arbol(
   conn.close()
 
 
+def eliminar_arbol(codigo):
+  conn = sqlite3.connect("arboles.db")
+  c = conn.cursor()
+  c.execute("DELETE FROM arboles WHERE codigo = ?", (codigo,))
+  conn.commit()
+  conn.close()
+
+
 def obtener_arboles():
   conn = sqlite3.connect("arboles.db")
   df = pd.read_sql_query("SELECT * FROM arboles", conn)
@@ -135,96 +143,134 @@ def obtener_arboles():
   return df
 
 
-# --- ENCABEZADO PRINCIPAL ---
-st.title("🌳 SEPAL - Programa Smart Vita")
-st.subheader(
-    "Piloto de Caracterización de Árboles - Avenida de los Estudiantes"
-)
+# --- FUNCIÓN AUXILIAR PARA MOSTRAR LOGO ---
+def mostrar_logo(ancho=220):
+  if os.path.exists(LOGO_LOCAL):
+    st.image(LOGO_LOCAL, width=ancho)
+  else:
+    st.image(LOGO_SEPAL_URL, width=ancho)
+
+
+# --- ENCABEZADO SUPERIOR CENTRADO ---
+col_izq, col_centro, col_der = st.columns([1, 2, 1])
+with col_centro:
+  mostrar_logo(ancho=240)
+
+st.markdown("<h1 style='text-align: center;'>SEPAL S.A. — Programa Smart Vita</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: gray;'>🌱 Caracterización Arbórea y Cobertura Vegetal | Avenida de los Estudiantes, Pasto</p>", unsafe_allow_html=True)
+
+st.markdown("---")
 
 # --- BARRA LATERAL ---
-st.sidebar.header("Menú Principal")
-rol = st.sidebar.radio(
-    "Selecciona una vista:", ["👤 Consulta Pública", "🛠️ Panel Administrador"]
-)
+with st.sidebar:
+  mostrar_logo(ancho=180)
+  st.markdown("### **Módulo de Navegación**")
+  rol = st.radio("Ir a:", ["👤 Consulta Pública", "🛠️ Panel Administrador"])
 
 # ==========================================
 # VISTA 1: CONSULTA PÚBLICA (USUARIO)
 # ==========================================
 if rol == "👤 Consulta Pública":
-  st.header("Catálogo de Especies Urbe")
-
   df = obtener_arboles()
 
   if df.empty:
-    st.info("Aún no hay árboles registrados.")
+    st.info("No hay registros en el inventario arbóreo.")
   else:
-    busqueda = st.text_input(
-        "🔍 Buscar por código (ej. ARB-001) o nombre común:"
+    tab_listado, tab_detalle = st.tabs(
+        ["📖 Inventario General", "🔍 Ficha Individual de Especie"]
     )
 
-    if busqueda:
-      df_filtrado = df[
-          df["codigo"].str.contains(busqueda, case=False)
-          | df["nombre_comun"].str.contains(busqueda, case=False)
-      ]
+    with tab_listado:
+      col_busq, col_cant = st.columns([3, 1])
+      with col_busq:
+        busqueda = st.text_input(
+            "🔍 Filtrar por código o nombre común:", placeholder="ej. Urapán..."
+        )
+      with col_cant:
+        st.metric("Total Árboles", len(df))
+
+      if busqueda:
+        df_mostrar = df[
+            df["codigo"].str.contains(busqueda, case=False)
+            | df["nombre_comun"].str.contains(busqueda, case=False)
+        ]
+      else:
+        df_mostrar = df
+
       st.dataframe(
-          df_filtrado.drop(columns=["foto_path"], errors="ignore"),
+          df_mostrar.drop(columns=["foto_path"], errors="ignore"),
           use_container_width=True,
-      )
-    else:
-      st.dataframe(
-          df.drop(columns=["foto_path"], errors="ignore"),
-          use_container_width=True,
+          height=220,
       )
 
-    st.markdown("---")
-    st.subheader("📋 Ficha de Detalle del Árbol")
+      st.markdown("##### **Seleccionar árbol para ir a la Ficha Técnica:**")
+      col_sel, col_btn = st.columns([3, 1])
 
-    codigo_sel = st.selectbox(
-        "Selecciona un código para ver ficha:", df["codigo"].unique()
-    )
+      with col_sel:
+        codigo_elegido = st.selectbox(
+            "Elige un árbol para ver detalles:",
+            df_mostrar["codigo"].unique(),
+            key="select_publico",
+        )
 
-    if codigo_sel:
-      arbol = df[df["codigo"] == codigo_sel].iloc[0]
+      with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔍 Ver Ficha Técnica"):
+          st.session_state.arbol_seleccionado = codigo_elegido
+          st.success(f"Cargando ficha de {codigo_elegido}...")
 
-      col_foto, col_datos1, col_datos2 = st.columns([1.2, 1, 1])
+    with tab_detalle:
+      codigo_actual = st.session_state.arbol_seleccionado or (
+          df["codigo"].iloc[0] if not df.empty else None
+      )
 
-      with col_foto:
-        foto_ruta = arbol.get("foto_path", "")
-        if (
-            pd.notna(foto_ruta)
-            and foto_ruta != ""
-            and os.path.exists(str(foto_ruta))
-        ):
-          st.image(
-              foto_ruta,
-              caption=f"Foto Registro: {arbol['codigo']}",
-              use_container_width=True,
-          )
-        else:
-          st.info("📷 Registro sin fotografía por el momento.")
+      codigo_sel = st.selectbox(
+          "Ver detalle del código:",
+          df["codigo"].unique(),
+          index=list(df["codigo"].unique()).index(codigo_actual)
+          if codigo_actual in df["codigo"].unique()
+          else 0,
+          key="select_detalle",
+      )
 
-      with col_datos1:
-        st.metric("Código ID", arbol["codigo"])
-        st.write(f"**Nombre Común:** {arbol['nombre_comun']}")
-        st.write(f"**Especie Científica:** *{arbol['especie']}*")
-        st.write(f"**Altura Estimada:** {arbol['altura_m']} m")
+      if codigo_sel:
+        arbol = df[df["codigo"] == codigo_sel].iloc[0]
 
-      with col_datos2:
-        st.write(f"**Estado de Salud:** {arbol['estado_salud']}")
-        st.write(f"**Ubicación/Tramo:** {arbol['ubicacion_tramo']}")
-        st.write(f"**Observaciones:** {arbol['observaciones']}")
+        col_img, col_info1, col_info2 = st.columns([1, 1.2, 1.2])
+
+        with col_img:
+          foto_ruta = arbol.get("foto_path", "")
+          if (
+              pd.notna(foto_ruta)
+              and foto_ruta != ""
+              and os.path.exists(str(foto_ruta))
+          ):
+            st.image(
+                foto_ruta,
+                caption=f"Registro Fotográfico: {arbol['codigo']}",
+                use_container_width=True,
+            )
+          else:
+            st.warning("📷 Sin fotografía registrada.")
+
+        with col_info1:
+          st.metric("Código ID", arbol["codigo"])
+          st.write(f"**Nombre Común:** {arbol['nombre_comun']}")
+          st.write(f"**Especie Científica:** *{arbol['especie']}*")
+
+        with col_info2:
+          st.write(f"**Estado de Salud:** `{arbol['estado_salud']}`")
+          st.write(f"**Altura Estimada:** {arbol['altura_m']} m")
+          st.write(f"**Ubicación:** {arbol['ubicacion_tramo']}")
+          st.info(f"**Observaciones:** {arbol['observaciones']}")
 
 # ==========================================
-# VISTA 2: PANEL ADMINISTRADOR (LOGIN REQUERIDO)
+# VISTA 2: PANEL ADMINISTRADOR
 # ==========================================
 elif rol == "🛠️ Panel Administrador":
-  st.header("🔒 Módulo de Administración - SEPAL Smart Vita")
+  st.subheader("🔒 Gestión de Campo (Equipo Ambiental)")
 
-  # --- FORMULARIO DE LOGIN ---
   if not st.session_state.autenticado:
-    st.info("Ingresa tus credenciales para acceder a la gestión de datos.")
-
     col_login, _ = st.columns([1, 1])
     with col_login:
       usuario = st.text_input("Usuario", placeholder="admin")
@@ -235,82 +281,135 @@ elif rol == "🛠️ Panel Administrador":
             password
         ) == HASH_ADMIN:
           st.session_state.autenticado = True
-          st.success("¡Autenticación exitosa!")
+          st.success("Sesión iniciada correctamente.")
           st.rerun()
         else:
-          st.error("Usuario o contraseña incorrectos.")
+          st.error("Credenciales no válidas.")
 
-  # --- PANEL DE CONTROL (SESIÓN ACTIVA) ---
   else:
-    # Botón para Cerrar Sesión
-    col_saludo, col_logout = st.columns([3, 1])
+    col_saludo, col_logout = st.columns([4, 1])
     with col_saludo:
-      st.success("Sesión activa como **Administrador**.")
+      st.success("Sesión de Administración Activa")
     with col_logout:
       if st.button("🚪 Cerrar Sesión"):
         st.session_state.autenticado = False
         st.rerun()
 
     st.markdown("---")
-    st.subheader("➕ Registrar o Modificar Especie")
 
-    with st.form("form_arbol", clear_on_submit=True):
-      col_a, col_b = st.columns(2)
+    tab_crear_editar, tab_eliminar = st.tabs(
+        ["📝 Registrar / Editar Árbol", "🗑️ Eliminar Registro"]
+    )
 
-      with col_a:
-        codigo = st.text_input("Código Único *", placeholder="ej. ARB-003")
-        especie = st.text_input(
-            "Especie / Nombre Científico *", placeholder="ej. Acacia melanoxylon"
-        )
-        nombre_comun = st.text_input(
-            "Nombre Común", placeholder="ej. Acacia negra"
-        )
-        altura = st.number_input("Altura (metros)", min_value=0.0, step=0.5)
+    df_admin = obtener_arboles()
 
-      with col_b:
-        estado = st.selectbox(
-            "Estado de Salud", ["Excelente", "Bueno", "Regular", "Crítico"]
-        )
-        ubicacion = st.text_input(
-            "Tramo / Referencia", placeholder="Frente a Calle 18..."
-        )
-        observaciones = st.text_area("Observaciones Ambientales")
-
-      st.markdown("📷 **Fotografía de Campo**")
-      archivo_foto = st.file_uploader(
-          "Cargar imagen (JPG, PNG)", type=["jpg", "png", "jpeg"]
+    with tab_crear_editar:
+      modo = st.radio(
+          "Selecciona la acción:",
+          ["➕ Crear Nuevo Registro", "✏️ Editar Existente"],
+          horizontal=True,
       )
 
-      submitted = st.form_submit_button("💾 Guardar Datos y Imagen")
+      v_codigo = ""
+      v_especie = ""
+      v_nombre = ""
+      v_altura = 0.0
+      v_estado = "Bueno"
+      v_ubicacion = ""
+      v_obs = ""
+      v_foto_path = ""
 
-      if submitted:
-        if codigo and especie:
-          foto_path = ""
+      if modo == "✏️ Editar Existente" and not df_admin.empty:
+        codigo_edit = st.selectbox(
+            "Selecciona el árbol que deseas editar:", df_admin["codigo"].unique()
+        )
+        arbol_ed = df_admin[df_admin["codigo"] == codigo_edit].iloc[0]
 
-          if archivo_foto is not None:
-            ext = archivo_foto.name.split(".")[-1]
-            nombre_archivo = f"{codigo}.{ext}"
-            foto_path = os.path.join(CARPETA_FOTOS, nombre_archivo)
+        v_codigo = arbol_ed["codigo"]
+        v_especie = arbol_ed["especie"]
+        v_nombre = arbol_ed["nombre_comun"]
+        v_altura = float(arbol_ed["altura_m"]) if arbol_ed["altura_m"] else 0.0
+        v_estado = (
+            arbol_ed["estado_salud"]
+            if arbol_ed["estado_salud"]
+            in ["Excelente", "Bueno", "Regular", "Crítico"]
+            else "Bueno"
+        )
+        v_ubicacion = arbol_ed["ubicacion_tramo"]
+        v_obs = arbol_ed["observaciones"]
+        v_foto_path = arbol_ed.get("foto_path", "")
 
-            with open(foto_path, "wb") as f:
-              f.write(archivo_foto.getbuffer())
+      with st.form("form_admin_arbol", clear_on_submit=False):
+        col_a, col_b = st.columns(2)
 
-          agregar_arbol(
-              codigo,
-              especie,
-              nombre_comun,
-              altura,
-              estado,
-              ubicacion,
-              observaciones,
-              foto_path,
+        with col_a:
+          codigo = st.text_input(
+              "Código Único *",
+              value=v_codigo,
+              disabled=(modo == "✏️ Editar Existente"),
           )
-          st.success(f"¡Árbol {codigo} guardado correctamente!")
+          especie = st.text_input("Especie / Nombre Científico *", value=v_especie)
+          nombre_comun = st.text_input("Nombre Común", value=v_nombre)
+          altura = st.number_input(
+              "Altura (m)", min_value=0.0, step=0.5, value=v_altura
+          )
+
+        with col_b:
+          estado = st.selectbox(
+              "Estado de Salud",
+              ["Excelente", "Bueno", "Regular", "Crítico"],
+              index=["Excelente", "Bueno", "Regular", "Crítico"].index(v_estado),
+          )
+          ubicacion = st.text_input("Tramo / Referencia", value=v_ubicacion)
+          observaciones = st.text_area("Observaciones Ambientales", value=v_obs)
+
+        archivo_foto = st.file_uploader(
+            "📷 Cargar o reemplazar imagen (JPG, PNG)",
+            type=["jpg", "png", "jpeg"],
+        )
+
+        submitted = st.form_submit_button("💾 Guardar Registro")
+
+        if submitted:
+          if codigo and especie:
+            foto_path = v_foto_path
+            if archivo_foto is not None:
+              ext = archivo_foto.name.split(".")[-1]
+              nombre_archivo = f"{codigo}.{ext}"
+              foto_path = os.path.join(CARPETA_FOTOS, nombre_archivo)
+              with open(foto_path, "wb") as f:
+                f.write(archivo_foto.getbuffer())
+
+            agregar_actualizar_arbol(
+                codigo,
+                especie,
+                nombre_comun,
+                altura,
+                estado,
+                ubicacion,
+                observaciones,
+                foto_path,
+            )
+            st.success(f"¡Árbol {codigo} guardado exitosamente!")
+            st.rerun()
+          else:
+            st.error("Completa el Código y la Especie.")
+
+    with tab_eliminar:
+      st.markdown("#### ⚠️ Eliminar un registro permanentemente")
+      if not df_admin.empty:
+        codigo_borrar = st.selectbox(
+            "Selecciona el árbol a eliminar:",
+            df_admin["codigo"].unique(),
+            key="del_sel",
+        )
+        if st.button("❌ Confirmar Eliminación", type="primary"):
+          eliminar_arbol(codigo_borrar)
+          st.success(f"Árbol {codigo_borrar} eliminado con éxito.")
           st.rerun()
-        else:
-          st.error("Debes completar al menos el Código y la Especie.")
+      else:
+        st.info("No hay registros para eliminar.")
 
     st.markdown("---")
-    st.subheader("📊 Base de Datos Completa")
-    df_admin = obtener_arboles()
-    st.dataframe(df_admin, use_container_width=True)
+    st.markdown("#### 📊 Base de Datos General")
+    st.dataframe(obtener_arboles(), use_container_width=True, height=200)
