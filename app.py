@@ -92,9 +92,62 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+CAMPOS_BD = [
+    "codigo",
+    "codigo_qr",
+    "nombre_comun",
+    "nombre_cientifico",
+    "familia",
+    "genero",
+    "especie",
+    "origen",
+    "latitud",
+    "longitud",
+    "altitud",
+    "direccion",
+    "barrio",
+    "comuna",
+    "sector",
+    "coord_magna",
+    "dap",
+    "altura_total",
+    "altura_fuste",
+    "diametro_mayor_copa",
+    "diametro_menor_copa",
+    "area_copa",
+    "estado_fuste",
+    "inclinacion",
+    "cavidades_descortezamiento",
+    "ramas_secas",
+    "raices_expuestas",
+    "plagas",
+    "enfermedades",
+    "sintomas",
+    "porcentaje_afectacion",
+    "estado_copa",
+    "estado_general",
+    "riesgo_volcamiento",
+    "riesgo_caida_ramas",
+    "interferencia_redes",
+    "infraestructura_movilidad",
+    "emplazamiento",
+    "infraestructura",
+    "manejo",
+    "priorizacion",
+    "evidencia_fuste",
+    "evidencia_copa",
+    "evidencia_afectaciones",
+    "evidencia_general",
+    "fecha_inventario",
+    "responsable",
+    "fecha_actualizacion",
+    "intervencion_realizada",
+    "nueva_evaluacion",
+]
+
 
 # ==========================================
-# 🗄️ 3. BASE DE DATOS SQLITE (50 CAMPOS COMPLETOS)
+# 🗄️ 3. BASE DE DATOS SQLITE
 # ==========================================
 def init_db():
   conn = sqlite3.connect("arboles.db")
@@ -280,8 +333,11 @@ def insertar_datos_prueba():
   conn.close()
 
 
-init_db()
-insertar_datos_prueba()
+def obtener_arboles():
+  conn = sqlite3.connect("arboles.db")
+  df = pd.read_sql_query("SELECT * FROM arboles", conn)
+  conn.close()
+  return df
 
 
 def agregar_actualizar_arbol(datos: dict):
@@ -295,6 +351,39 @@ def agregar_actualizar_arbol(datos: dict):
   conn.close()
 
 
+def cargar_dataframe_masivo(df_excel: pd.DataFrame):
+  conn = sqlite3.connect("arboles.db")
+  c = conn.cursor()
+
+  df_excel.columns = df_excel.columns.str.strip()
+
+  for col in CAMPOS_BD:
+    if col not in df_excel.columns:
+      df_excel[col] = None
+
+  df_excel = df_excel[CAMPOS_BD]
+  df_excel["codigo"] = df_excel["codigo"].astype(str).str.strip()
+  df_excel = df_excel[
+      (df_excel["codigo"] != "")
+      & (df_excel["codigo"] != "nan")
+      & (df_excel["codigo"].notna())
+  ]
+
+  df_excel = df_excel.astype(object).where(pd.notna(df_excel), None)
+  registros = df_excel.to_dict(orient="records")
+
+  columnas_str = ", ".join(CAMPOS_BD)
+  placeholders = ", ".join(["?"] * len(CAMPOS_BD))
+  sql = f"INSERT OR REPLACE INTO arboles ({columnas_str}) VALUES ({placeholders})"
+
+  for reg in registros:
+    valores = [reg[col] for col in CAMPOS_BD]
+    c.execute(sql, valores)
+
+  conn.commit()
+  conn.close()
+
+
 def eliminar_arbol(codigo):
   conn = sqlite3.connect("arboles.db")
   c = conn.cursor()
@@ -303,15 +392,12 @@ def eliminar_arbol(codigo):
   conn.close()
 
 
-def obtener_arboles():
-  conn = sqlite3.connect("arboles.db")
-  df = pd.read_sql_query("SELECT * FROM arboles", conn)
-  conn.close()
-  return df
+init_db()
+insertar_datos_prueba()
 
 
 # ==========================================
-# 🗺️ 4. MAPA SATELITAL HD (BLINDADO)
+# 🗺️ 4. MAPA SATELITAL HD (CORREGIDO)
 # ==========================================
 def generar_mapa_html(df):
   if df.empty:
@@ -321,6 +407,10 @@ def generar_mapa_html(df):
 
   if "lat" in df_mapa.columns and "latitud" not in df_mapa.columns:
     df_mapa.rename(columns={"lat": "latitud", "lon": "longitud"}, inplace=True)
+
+  # Asegurar conversión a numérico por si vienen como string desde Excel
+  df_mapa["latitud"] = pd.to_numeric(df_mapa["latitud"], errors="coerce")
+  df_mapa["longitud"] = pd.to_numeric(df_mapa["longitud"], errors="coerce")
 
   df_valido = df_mapa.dropna(subset=["latitud", "longitud"])
   df_valido = df_valido[
@@ -336,14 +426,18 @@ def generar_mapa_html(df):
 
   puntos_js = []
   for _, r in df_valido.iterrows():
-    color = "#76ff03" if r.get("origen") == "Nativo" else "#ff3d00"
-    codigo = r.get("codigo", "S/C")
-    nombre = r.get("nombre_comun", "Árbol")
-    cientifico = r.get("nombre_cientifico", "")
-    dap = r.get("dap", "N/A")
-    altura = r.get("altura_total", "N/A")
-    estado = r.get("estado_general", "N/A")
-    direccion = r.get("direccion", "Sin dirección")
+    color = (
+        "#76ff03"
+        if str(r.get("origen", "")).strip().capitalize() == "Nativo"
+        else "#ff3d00"
+    )
+    codigo = str(r.get("codigo") or "S/C")
+    nombre = str(r.get("nombre_comun") or "Árbol")
+    cientifico = str(r.get("nombre_cientifico") or "")
+    dap = str(r.get("dap") or "N/A")
+    altura = str(r.get("altura_total") or "N/A")
+    estado = str(r.get("estado_general") or "N/A")
+    direccion = str(r.get("direccion") or "Sin dirección")
 
     popup = f"""
         <div style='font-family: Arial; font-size: 12px; width: 210px;'>
@@ -354,10 +448,21 @@ def generar_mapa_html(df):
             <b>Ubicación:</b> {direccion}
         </div>
         """
-    popup_clean = popup.replace("\n", "").replace("'", "\\'")
 
+    # Limpieza total de saltos de línea y escape de comillas
+    popup_clean = (
+        popup.replace("\r", "")
+        .replace("\n", "")
+        .replace("'", "\\'")
+        .replace('"', "&quot;")
+    )
+
+    lat_val = r["latitud"]
+    lng_val = r["longitud"]
+
+    # ✅ Sintaxis corregida: lat_val y lng_val sin corchetes dobles
     puntos_js.append(f"""
-            L.circleMarker([{r['latitud']}, {r['longitud']}], {{
+            L.circleMarker([{lat_val}, {lng_val}], {{
                 radius: 8,
                 fillColor: "{color}",
                 color: "#ffffff",
@@ -368,9 +473,10 @@ def generar_mapa_html(df):
         """)
 
   js_markers = "\n".join(puntos_js)
-  lat_center = df_valido["latitud"].mean()
-  lng_center = df_valido["longitud"].mean()
+  lat_center = float(df_valido["latitud"].mean())
+  lng_center = float(df_valido["longitud"].mean())
 
+  # ✅ Sintaxis corregida: setView([lat_center, lng_center], 17)
   html_code = f"""
     <!DOCTYPE html>
     <html>
@@ -379,8 +485,8 @@ def generar_mapa_html(df):
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <style>
-            #map {{ width: 100%; height: 500px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); }}
-            body {{ margin: 0; padding: 0; background: transparent; }}
+            html, body {{ margin: 0; padding: 0; height: 100%; width: 100%; }}
+            #map {{ width: 100%; height: 100vh; border-radius: 12px; border: 1px solid rgba(255,255,255,0.2); }}
         </style>
     </head>
     <body>
@@ -400,20 +506,18 @@ def generar_mapa_html(df):
     """
   return html_code
 
-
 # ==========================================
 # 🖼️ 5. ENCABEZADO Y LOGO
 # ==========================================
 col_espacio1, col_logo, col_espacio2 = st.columns([1, 4, 1])
 with col_logo:
   if os.path.exists(LOGO_LOCAL):
-    st.image(LOGO_LOCAL, use_container_width=True)
+    st.image(LOGO_LOCAL, width="stretch")
   else:
-    st.image(LOGO_SEPAL_URL, use_container_width=True)
+    st.image(LOGO_SEPAL_URL, width="stretch")
 
 st.markdown(
-    "<h1 style='text-align: center; margin-top: -15px;'>Programa Smart"
-    " Vita</h1>",
+    "<h1 style='text-align: center; margin-top: -15px;'>Programa Smart Vita</h1>",
     unsafe_allow_html=True,
 )
 st.markdown(
@@ -425,7 +529,7 @@ st.markdown(
 st.markdown("---")
 
 # ==========================================
-# 🧭 6. BARRA LATERAL (NAVEGACIÓN)
+# 🧭 6. BARRA LATERAL
 # ==========================================
 with st.sidebar:
   st.markdown("### **Navegación Principal**")
@@ -441,17 +545,16 @@ if rol == "👤 Consulta Pública":
   st.sidebar.markdown("### **Filtros de Búsqueda**")
   busqueda = st.sidebar.text_input("🔍 Buscar por Código o Nombre:")
 
-  if not df.empty and "estado_general" in df.columns:
-    estados_unicos = ["Todos"] + list(df["estado_general"].dropna().unique())
-  else:
-    estados_unicos = ["Todos"]
-
+  estados_unicos = (
+      ["Todos"] + list(df["estado_general"].dropna().unique())
+      if not df.empty and "estado_general" in df.columns
+      else ["Todos"]
+  )
   filtro_estado = st.sidebar.selectbox(
       "Filtrar por Estado General:", estados_unicos
   )
 
   df_filtrado = df.copy()
-
   if not df_filtrado.empty:
     if busqueda:
       col_cod = (
@@ -477,7 +580,8 @@ if rol == "👤 Consulta Pública":
   c1, c2, c3, c4 = st.columns(4)
   with c1:
     st.markdown(
-        f"<div class='metric-card'><h4>Total Registros</h4><h2>{len(df_filtrado)}</h2></div>",
+        f"<div class='metric-card'><h4>Total"
+        f" Registros</h4><h2>{len(df_filtrado)}</h2></div>",
         unsafe_allow_html=True,
     )
   with c2:
@@ -487,7 +591,8 @@ if rol == "👤 Consulta Pública":
         else 0
     )
     st.markdown(
-        f"<div class='metric-card'><h4>Especies Nativas</h4><h2>{nativos}</h2></div>",
+        f"<div class='metric-card'><h4>Especies"
+        f" Nativas</h4><h2>{nativos}</h2></div>",
         unsafe_allow_html=True,
     )
   with c3:
@@ -497,8 +602,8 @@ if rol == "👤 Consulta Pública":
         else 0
     )
     st.markdown(
-        f"<div class='metric-card'><h4>DAP Promedio</h4><h2>{prom_dap}"
-        " cm</h2></div>",
+        f"<div class='metric-card'><h4>DAP"
+        f" Promedio</h4><h2>{prom_dap} cm</h2></div>",
         unsafe_allow_html=True,
     )
   with c4:
@@ -508,16 +613,15 @@ if rol == "👤 Consulta Pública":
         else 0
     )
     st.markdown(
-        f"<div class='metric-card'><h4>Altura Prom.</h4><h2>{prom_alt}"
-        " m</h2></div>",
+        f"<div class='metric-card'><h4>Altura"
+        f" Prom.</h4><h2>{prom_alt} m</h2></div>",
         unsafe_allow_html=True,
     )
 
   st.markdown("<br>", unsafe_allow_html=True)
-
   st.markdown("### 🗺️ Mapa General del Inventario Arbóreo (ArcGIS Satellite)")
-  html_mapa = generar_mapa_html(df_filtrado)
-  components.html(html_mapa, height=520)
+  import streamlit.components.v1 as components
+  components.html(generar_mapa_html(df_filtrado), height=520)
 
   st.markdown("### 📋 Consultar Ficha Técnica Completa")
   if not df_filtrado.empty and "codigo" in df_filtrado.columns:
@@ -539,7 +643,10 @@ if rol == "👤 Consulta Pública":
         st.write(f"**Familia:** {arbol_info.get('familia')}")
         st.write(f"**Origen:** {arbol_info.get('origen')}")
         st.write(f"**Ubicación:** {arbol_info.get('direccion')}")
-        st.write(f"**Barrio/Comuna:** {arbol_info.get('barrio')} / {arbol_info.get('comuna')}")
+        st.write(
+            f"**Barrio/Comuna:** {arbol_info.get('barrio')} /"
+            f" {arbol_info.get('comuna')}"
+        )
       with c_f2:
         st.write(f"**DAP:** {arbol_info.get('dap')} cm")
         st.write(f"**Altura Total:** {arbol_info.get('altura_total')} m")
@@ -547,9 +654,16 @@ if rol == "👤 Consulta Pública":
         st.write(f"**Diámetro Copa:** {arbol_info.get('diametro_mayor_copa')} m")
         st.write(f"**Estado General:** {arbol_info.get('estado_general')}")
       with c_f3:
-        st.write(f"**Coordenadas:** {arbol_info.get('latitud')}, {arbol_info.get('longitud')}")
-        st.write(f"**Riesgo Volcamiento:** {arbol_info.get('riesgo_volcamiento')}")
-        st.write(f"**Riesgo Caída Ramas:** {arbol_info.get('riesgo_caida_ramas')}")
+        st.write(
+            "**Coordenadas:**"
+            f" {arbol_info.get('latitud')}, {arbol_info.get('longitud')}"
+        )
+        st.write(
+            f"**Riesgo Volcamiento:** {arbol_info.get('riesgo_volcamiento')}"
+        )
+        st.write(
+            f"**Riesgo Caída Ramas:** {arbol_info.get('riesgo_caida_ramas')}"
+        )
         st.write(f"**Manejo Recomendado:** {arbol_info.get('manejo')}")
         st.write(f"**Fecha Inventario:** {arbol_info.get('fecha_inventario')}")
 
@@ -564,7 +678,7 @@ if rol == "👤 Consulta Pública":
   )
 
 # ==========================================
-# 🛠️ VISTA 2: PANEL ADMINISTRADOR (PROTEGIDO)
+# 🛠️ VISTA 2: PANEL ADMINISTRADOR
 # ==========================================
 elif rol == "🛠️ Panel Administrador":
   if not st.session_state.autenticado:
@@ -590,14 +704,14 @@ elif rol == "🛠️ Panel Administrador":
       st.session_state.autenticado = False
       st.rerun()
 
-    st.markdown(
-        "### 🛠️ Gestión Completa del Inventario Arbóreo (50 Variables)"
-    )
+    st.markdown("### 🛠️ Gestión Completa del Inventario Arbóreo")
     df = obtener_arboles()
 
-    tab1, tab2 = st.tabs(
-        ["➕ Registrar / Editar Árbol", "🗑️ Eliminar Registros"]
-    )
+    tab1, tab2, tab3 = st.tabs([
+        "➕ Registrar / Editar Árbol",
+        "📂 Carga Masiva y Respaldo (Excel)",
+        "🗑️ Eliminar Registros",
+    ])
 
     with tab1:
       opciones_edicion = ["-- Nuevo Registro --"] + (
@@ -668,7 +782,8 @@ elif rol == "🛠️ Panel Administrador":
         c5, c6, c7, c8 = st.columns(4)
         with c5:
           nombre_comun = st.text_input(
-              "Nombre Común*", value=datos_prev.get("nombre_comun", "Siete Cueros")
+              "Nombre Común*",
+              value=datos_prev.get("nombre_comun", "Siete Cueros"),
           )
           nombre_cientifico = st.text_input(
               "Nombre Científico*",
@@ -903,13 +1018,69 @@ elif rol == "🛠️ Panel Administrador":
               "fecha_actualizacion": fecha_actualizacion,
           }
           agregar_actualizar_arbol(nuevo_arbol)
-          st.success(
-              f"✅ Árbol {codigo} guardado exitosamente con todas sus"
-              " variables."
-          )
+          st.success(f"✅ Árbol {codigo} guardado exitosamente.")
           st.rerun()
 
     with tab2:
+      st.subheader("📂 Respaldo y Carga Masiva mediante Excel")
+      st.info(
+          "Descarga la base de datos actual para usarla como plantilla o"
+          " realiza respaldos periódicos."
+      )
+
+      c_down, c_up = st.columns(2)
+
+      with c_down:
+        st.markdown("#### 1. Descargar Respaldo / Plantilla Base")
+        df_export = obtener_arboles()
+
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+          df_export.to_excel(
+              writer, index=False, sheet_name="Inventario_SmartVita"
+          )
+
+        st.download_button(
+            label="⬇️ Descargar Backup / Plantilla (.xlsx)",
+            data=buffer.getvalue(),
+            file_name="Backup_Smart_Vita_SEPAL.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+      with c_up:
+        st.markdown("#### 2. Carga Masiva desde Excel")
+        archivo_excel = st.file_uploader(
+            "Selecciona el archivo Excel con nuevos registros o"
+            " actualizaciones:",
+            type=["xlsx", "xls"],
+        )
+
+        if archivo_excel is not None:
+          if st.button("🚀 Ejecutar Carga Masiva a la Base de Datos"):
+            try:
+              df_import = pd.read_excel(archivo_excel)
+              df_import.columns = df_import.columns.str.strip()
+
+              if "codigo" in df_import.columns:
+                cargar_dataframe_masivo(df_import)
+                st.success(
+                    "🎉 Carga masiva completada exitosamente"
+                    f" ({len(df_import)} registros procesados)."
+                )
+                st.rerun()
+              else:
+                st.error(
+                    "❌ El archivo Excel debe contener la columna obligatoria"
+                    " 'codigo'."
+                )
+            except Exception as e:
+              st.error(f"❌ Error al procesar el archivo Excel: {e}")
+
+      st.markdown("---")
+      st.markdown("#### 📊 Vista previa de la Base de Datos Local")
+      st.dataframe(df, width="stretch")
+
+    with tab3:
       if not df.empty and "codigo" in df.columns:
         codigo_eliminar = st.selectbox(
             "Selecciona el código del árbol a ELIMINAR:", df["codigo"].tolist()
